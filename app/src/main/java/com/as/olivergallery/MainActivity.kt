@@ -1,4 +1,4 @@
-package com.as.olivergallery
+package com.`as`.olivergallery
 
 import android.app.Activity
 import android.content.Intent
@@ -157,7 +157,7 @@ class MainActivity : Activity() {
 
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply {
-            fillViewport = true
+            isFillViewport = true
             clipToPadding = false
         }
         scroll.addView(content)
