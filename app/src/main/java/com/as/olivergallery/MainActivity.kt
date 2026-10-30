@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -22,6 +23,7 @@ import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.MediaItem
@@ -60,6 +62,21 @@ class MainActivity : Activity() {
     private var videoIndex = 0
     private var player: ExoPlayer? = null
     private var playerView: PlayerView? = null
+    private var seekBar: SeekBar? = null
+    private var seekInProgress = false
+    private val updateProgress = object : Runnable {
+        override fun run() {
+            val exo = player ?: return
+            if (!seekInProgress) {
+                val duration = exo.duration
+                seekBar?.progress = if (duration > 0L) {
+                    (exo.currentPosition.toDouble() / duration.toDouble() * 1000)
+                        .toInt().coerceIn(0, 1000)
+                } else 0
+            }
+            ui.postDelayed(this, 250L)
+        }
+    }
     private var downX = 0f
     private var downY = 0f
     private var importing = false
@@ -305,40 +322,82 @@ class MainActivity : Activity() {
         if (videos.isEmpty() || index !in videos.indices) return
         videoIndex = index
         screen = Screen.PLAYER
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        // Hide status only; leave Android's navigation/back button or gesture available.
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN
         root.removeAllViews()
         root.setBackgroundColor(Color.BLACK)
 
         val view = PlayerView(this).apply {
-            useController = true
+            useController = false  // Removes large pause / seek / skip overlays.
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             setBackgroundColor(Color.BLACK)
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         playerView = view
+
         player = ExoPlayer.Builder(this).build().also {
             it.repeatMode = Player.REPEAT_MODE_ONE
             view.player = it
         }
 
-        val back = button("‹ VOLTAR") {
-            releasePlayer()
-            showVideos()
+        // Transparent gesture area: tap pauses/plays; vertical swipes change videos.
+        // It sits behind the progress bar, so the bar remains seekable.
+        val gestures = View(this).apply {
+            isClickable = true
+            setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = event.x
+                        downY = event.y
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val dx = event.x - downX
+                        val dy = event.y - downY
+                        if (abs(dy) > dp(90) && abs(dy) > abs(dx) * 1.25f) {
+                            swipeVideo(if (dy < 0) 1 else -1)
+                        } else if (abs(dx) < dp(25) && abs(dy) < dp(25)) {
+                            val exo = player
+                            if (exo?.isPlaying == true) exo.pause() else exo?.play()
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> true
+                    else -> true
+                }
+            }
         }
-        root.addView(back, FrameLayout.LayoutParams(dp(105), dp(44),
-            Gravity.TOP or Gravity.START).apply {
-            leftMargin = dp(15)
-            topMargin = dp(26)
+        root.addView(gestures, FrameLayout.LayoutParams(-1, -1))
+
+        // Only visible control: permanent seek/progress bar at the bottom.
+        val timeline = SeekBar(this).apply {
+            max = 1000
+            progress = 0
+            progressTintList = ColorStateList.valueOf(red)
+            progressBackgroundTintList = ColorStateList.valueOf(Color.DKGRAY)
+            thumbTintList = ColorStateList.valueOf(red)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onStartTrackingTouch(seekBar: SeekBar) {
+                    seekInProgress = true
+                }
+                override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar) {
+                    val duration = player?.duration ?: 0L
+                    if (duration > 0L) {
+                        player?.seekTo(duration * seekBar.progress / 1000L)
+                    }
+                    seekInProgress = false
+                }
+            })
+        }
+        seekBar = timeline
+        root.addView(timeline, FrameLayout.LayoutParams(-1, dp(44), Gravity.BOTTOM).apply {
+            leftMargin = dp(8)
+            rightMargin = dp(8)
+            bottomMargin = dp(5)
         })
-        val hint = label("↑ próximo    ↓ anterior", 12f, Color.WHITE).apply {
-            gravity = Gravity.CENTER
-            background = background(0x99000000.toInt(), null, 8)
-        }
-        root.addView(hint, FrameLayout.LayoutParams(dp(200), dp(30),
-            Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(34) })
+        ui.removeCallbacks(updateProgress)
+        ui.post(updateProgress)
         selectVideo()
     }
 
@@ -356,23 +415,10 @@ class MainActivity : Activity() {
         selectVideo()
     }
 
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (screen == Screen.PLAYER) {
-            when (ev.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { downX = ev.x; downY = ev.y }
-                MotionEvent.ACTION_UP -> {
-                    val deltaY = ev.y - downY
-                    if (abs(deltaY) > dp(90) && abs(deltaY) > abs(ev.x - downX) * 1.25f) {
-                        swipeVideo(if (deltaY < 0) 1 else -1)
-                        return true
-                    }
-                }
-            }
-        }
-        return super.dispatchTouchEvent(ev)
-    }
-
     private fun releasePlayer() {
+        ui.removeCallbacks(updateProgress)
+        seekBar = null
+        seekInProgress = false
         playerView?.player = null
         player?.release()
         player = null
