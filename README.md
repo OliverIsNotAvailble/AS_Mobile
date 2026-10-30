@@ -6,7 +6,9 @@ App Android nativo (Kotlin) para organizar vídeos em **containers → pastas �
 - Tema preto, cartões escuros com bordas vermelhas.
 - Tela inicial com containers importados e botões **IMPORTAR** / **ATUALIZAR**.
 - Pastas por container, grade de prévias geradas a partir dos vídeos e player fullscreen.
-- Deslizar **para cima = próximo**, **para baixo = anterior**; botão Voltar retorna à grade.
+- Player sem ícones sobre o vídeo: **toque para pausar/continuar**, **deslize para cima = próximo**, **para baixo = anterior**.
+- Barra de progresso permanente na parte inferior (arraste para avançar/retroceder).
+- Botão/gesto **Voltar do Android** retorna à grade. As telas de containers/pastas mantêm os botões de navegação.
 - Importar arquivos `.oliver` (ZIP com manifest) ou `.zip` pela seleção de arquivos do Android.
 - Armazenamento local do app: `Android/data/com.as.olivergallery/files/base/` (pode variar conforme o armazenamento do aparelho).
 - Totalmente **offline**: não pede permissão ampla para acessar a galeria do telefone.
