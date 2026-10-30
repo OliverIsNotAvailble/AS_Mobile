@@ -1,35 +1,40 @@
 # Formato .oliver V1
 
-Um pacote \`.oliver\` é um **arquivo ZIP padrão** (compatível com ZIP64) sem criptografia.
+O `.oliver` é um arquivo **ZIP padrão** (compatível com ZIP64). Não é obrigatório usar o script: um ZIP normal também funciona.
 
-Estrutura:
-
-\`\`\`text
-Galeria.oliver
+```text
+Drama.oliver
   manifest.json
   folders/
-    Nome da Pasta/
-      01.mp4
-      02.webm
-    Outra Pasta/
-      video.mp4
-\`\`\`
+    drama01/
+      Dragão Alado do Fogo Chamuscante/
+        epi01/
+          cena.mp4
+          imagem.png
+          animação.gif
+        epi02/
+          clipe.webm
+```
 
-Manifest de exemplo:
+O diretório `folders/` é apenas um envelope interno do formato. O aplicativo abre o container direto em `drama01`, e **nunca mistura os arquivos de níveis diferentes**.
 
-\`\`\`json
+```json
 {
   "format": "AS_OLIVER_V1",
   "version": 1,
-  "name": "Minha Galeria",
-  "video_count": 3
+  "name": "Drama",
+  "media_count": 4,
+  "video_count": 2,
+  "image_count": 2
 }
-\`\`\`
+```
 
-O app usa o nome do arquivo como destino físico (ex.: \`Galeria.oliver\` vira \`base/Galeria/\`) e o campo \`name\` para exibição. Nome repetido cria sufixo \`(2)\`, \`(3)\` etc.
+O nome do arquivo vira a pasta física em `base/`, e o campo `name` é o título exibido. Se o nome já existir, o aplicativo adiciona `(2)`, `(3)` etc.
 
-ZIP comum também é aceito, mas a forma recomendada é o formato com \`folders/\`. Um pacote é **extraído** para a pasta privada externa do app; é necessário ter espaço livre para os vídeos extraídos. O pacote de origem não é apagado.
+Formatos aceitos pela galeria: MP4/M4V/MOV/WebM/MKV/AVI/TS/3GP, PNG/JPEG/GIF/WebP/BMP/HEIC/HEIF/AVIF/SVG. Decodificação e animação dependem da versão do Android e dos codecs do aparelho.
+
+O aplicativo extrai o pacote para `Android/data/com.as.olivergallery/files/base/`. Após importação, o arquivo ZIP original pode ser guardado como backup. Excluir pasta ou container dentro do aplicativo remove recursivamente o conteúdo extraído, mas não altera o ZIP original.
 
 ## Segurança
 
-O importador rejeita \`../\`, caminhos absolutos, entradas que escapem do destino e mais de 100 mil entradas; interrompe a extração quando a soma ultrapassa 20 GiB. Não execute arquivos do pacote. O formato é feito para **vídeos de confiança** gerados pelo seu próprio script.
+O importador rejeita caminhos `../`, caminhos absolutos, entradas que escapem da pasta de destino, mais de 100.000 entradas e mais de 20 GiB descompactados. Não importe arquivos de origem não confiável.
