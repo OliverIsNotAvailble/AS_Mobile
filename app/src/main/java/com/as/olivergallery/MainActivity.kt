@@ -1,6 +1,7 @@
 package com.`as`.olivergallery
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.pm.ActivityInfo
 import android.content.Intent
 import android.graphics.Bitmap
@@ -82,6 +83,9 @@ class MainActivity : Activity() {
     private var downX = 0f
     private var downY = 0f
     private var importing = false
+    private var deleteMode = false
+    private val selectedVideos = linkedSetOf<File>()
+    private var activeScroll: ScrollView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -150,7 +154,8 @@ class MainActivity : Activity() {
                 .takeIf { it.isNotBlank() } ?: c.name
         } catch (_: Exception) { c.name }
 
-    private fun buildPage(title: String, subtitle: String, back: Boolean): Pair<LinearLayout, LinearLayout> {
+    private fun buildPage(title: String, subtitle: String, back: Boolean,
+        rightText: String? = null, rightClick: (() -> Unit)? = null): Pair<LinearLayout, LinearLayout> {
         window.decorView.systemUiVisibility = 0
         root.removeAllViews()
         root.setBackgroundColor(Color.BLACK)
@@ -172,6 +177,10 @@ class MainActivity : Activity() {
         titles.addView(label(title, 23f, Color.WHITE, true))
         titles.addView(label(subtitle, 12f, muted))
         header.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
+        if (rightText != null && rightClick != null) {
+            header.addView(button(rightText, rightClick),
+                LinearLayout.LayoutParams(dp(105), dp(46)).apply { leftMargin = dp(8) })
+        }
         page.addView(header)
 
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -180,6 +189,7 @@ class MainActivity : Activity() {
             clipToPadding = false
         }
         scroll.addView(content)
+        activeScroll = scroll
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         return page to content
     }
@@ -192,7 +202,9 @@ class MainActivity : Activity() {
     }
 
     private fun addTiles(parent: LinearLayout, files: List<File>, columns: Int, video: Boolean,
-                         titleOf: (File) -> String, details: (File) -> String, open: (File) -> Unit) {
+                         titleOf: (File) -> String, details: (File) -> String,
+                         selectionMode: Boolean = false, selected: Set<File> = emptySet(),
+                         open: (File) -> Unit) {
         val grid = GridLayout(this).apply {
             columnCount = columns
             setPadding(dp(16), dp(10), dp(4), dp(20))
@@ -227,6 +239,22 @@ class MainActivity : Activity() {
                     maxLines = 2
                 }
                 tile.addView(caption, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+                if (selectionMode) {
+                    val checked = selected.contains(file)
+                    if (checked) {
+                        val shade = View(this).apply { setBackgroundColor(0x44ED2837) }
+                        tile.addView(shade, 1, FrameLayout.LayoutParams(-1, -1))
+                    }
+                    val marker = label(if (checked) "✓" else "○", 21f, Color.WHITE, true).apply {
+                        gravity = Gravity.CENTER
+                        background = background(if (checked) red else 0xBB111111.toInt(), red, 8)
+                    }
+                    tile.addView(marker, FrameLayout.LayoutParams(dp(34), dp(34),
+                        Gravity.TOP or Gravity.RIGHT).apply {
+                        topMargin = dp(6)
+                        rightMargin = dp(6)
+                    })
+                }
             } else {
                 val stack = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
@@ -271,7 +299,7 @@ class MainActivity : Activity() {
 
     private fun showHome() {
         screen = Screen.HOME
-        val (page, content) = buildPage("AS MOBILE", "CONTAINERS • OFFLINE", false)
+        val (page, content) = buildPage("OLIVER GL", "CONTAINERS • OFFLINE", false)
         val containers = sortedDirs(base)
         if (containers.isEmpty()) emptyMessage(content,
             "Nenhum container ainda.\n\nToque em IMPORTAR para escolher um pacote .oliver ou .zip.")
@@ -295,6 +323,8 @@ class MainActivity : Activity() {
 
     private fun showFolders() {
         val c = container ?: return showHome()
+        deleteMode = false
+        selectedVideos.clear()
         screen = Screen.FOLDERS
         val (_, content) = buildPage(containerName(c), "PASTAS", true)
         val folders = folders(c)
@@ -307,17 +337,86 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showVideos() {
+    private fun showVideos(scrollY: Int = 0) {
         val f = folder ?: return showFolders()
         screen = Screen.VIDEOS
         videos = findVideos(f)
-        val (_, content) = buildPage(
-            if (container != null && f == contentRoot(container!!)) "Vídeos" else f.name,
-            videos.size.toString() + " VÍDEO(S) • TOQUE PARA REPRODUZIR", true)
+        selectedVideos.retainAll(videos.toSet())
+        val title = if (container != null && f == contentRoot(container!!)) "Vídeos" else f.name
+        val subtitle = if (deleteMode)
+            selectedVideos.size.toString() + " SELECIONADO(S) • TOQUE NOS VÍDEOS"
+        else videos.size.toString() + " VÍDEO(S) • TOQUE PARA REPRODUZIR"
+
+        val (page, content) = buildPage(title, subtitle, true,
+            if (deleteMode) "CANCELAR" else "DEL", {
+                val pos = activeScroll?.scrollY ?: 0
+                deleteMode = !deleteMode
+                selectedVideos.clear()
+                showVideos(pos)
+            })
         if (videos.isEmpty()) emptyMessage(content, "Esta pasta não tem vídeos compatíveis.")
-        else addTiles(content, videos, 3, true, { it.nameWithoutExtension }, { "" }) { file ->
-            playAt(videos.indexOf(file))
+        else addTiles(content, videos, 3, true, { it.nameWithoutExtension }, { "" },
+            deleteMode, selectedVideos) { file ->
+            if (deleteMode) {
+                val pos = activeScroll?.scrollY ?: 0
+                if (!selectedVideos.add(file)) selectedVideos.remove(file)
+                showVideos(pos)
+            } else playAt(videos.indexOf(file))
         }
+
+        if (deleteMode) {
+            val del = button("EXCLUIR (" + selectedVideos.size + ")") {
+                if (selectedVideos.isNotEmpty()) confirmDeletion()
+            }.apply {
+                isEnabled = selectedVideos.isNotEmpty()
+                alpha = if (isEnabled) 1f else 0.45f
+            }
+            page.addView(del, LinearLayout.LayoutParams(-1, dp(50)).apply {
+                leftMargin = dp(16)
+                rightMargin = dp(16)
+                bottomMargin = dp(16)
+            })
+        }
+        if (scrollY > 0) {
+            val scroll = activeScroll
+            scroll?.post { scroll.scrollTo(0, scrollY) }
+        }
+    }
+
+    private fun confirmDeletion() {
+        if (selectedVideos.isEmpty() || !deleteMode) return
+        val count = selectedVideos.size
+        AlertDialog.Builder(this)
+            .setTitle("Excluir " + count + " vídeo(s)?")
+            .setMessage("Os vídeos selecionados serão apagados definitivamente da base do aplicativo. O arquivo .oliver original e os Downloads não serão alterados.")
+            .setNegativeButton("CANCELAR", null)
+            .setPositiveButton("EXCLUIR") { _, _ ->
+                val basePrefix = base.canonicalPath + File.separator
+                val currentFolder = folder?.canonicalFile?.toPath()
+                var deleted = 0
+                for (file in selectedVideos.toList()) {
+                    try {
+                        val canonical = file.canonicalFile
+                        if (currentFolder != null &&
+                            canonical.isFile &&
+                            isVideo(canonical) &&
+                            canonical.path.startsWith(basePrefix) &&
+                            canonical.toPath().startsWith(currentFolder) &&
+                            canonical.delete()) {
+                            thumbnails.remove(file.absolutePath)
+                            deleted++
+                        }
+                    } catch (_: Exception) {
+                        // Continue processing remaining selected files.
+                    }
+                }
+                selectedVideos.clear()
+                deleteMode = false
+                showVideos()
+                Toast.makeText(this,
+                    deleted.toString() + " de " + count + " vídeo(s) excluído(s)",
+                    Toast.LENGTH_LONG).show()
+            }.show()
     }
 
     private fun playAt(index: Int) {
@@ -473,7 +572,14 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when (screen) {
             Screen.PLAYER -> { releasePlayer(); showVideos() }
-            Screen.VIDEOS -> showFolders()
+            Screen.VIDEOS -> {
+                if (deleteMode) {
+                    val pos = activeScroll?.scrollY ?: 0
+                    deleteMode = false
+                    selectedVideos.clear()
+                    showVideos(pos)
+                } else showFolders()
+            }
             Screen.FOLDERS -> showHome()
             Screen.HOME -> super.onBackPressed()
         }
