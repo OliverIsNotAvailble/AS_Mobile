@@ -1,6 +1,7 @@
 package com.`as`.olivergallery
 
 import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -64,6 +65,7 @@ class MainActivity : Activity() {
     private var playerView: PlayerView? = null
     private var seekBar: SeekBar? = null
     private var seekInProgress = false
+    private var rotationStep = 0
     private val updateProgress = object : Runnable {
         override fun run() {
             val exo = player ?: return
@@ -322,6 +324,8 @@ class MainActivity : Activity() {
         if (videos.isEmpty() || index !in videos.indices) return
         videoIndex = index
         screen = Screen.PLAYER
+        rotationStep = 0
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         // Hide status only; leave Android's navigation/back button or gesture available.
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN
         root.removeAllViews()
@@ -393,12 +397,37 @@ class MainActivity : Activity() {
         seekBar = timeline
         root.addView(timeline, FrameLayout.LayoutParams(-1, dp(44), Gravity.BOTTOM).apply {
             leftMargin = dp(8)
-            rightMargin = dp(8)
+            rightMargin = dp(64)  // Leave room for the rotate button.
             bottomMargin = dp(5)
         })
+
+        // Rotate the ACTIVITY (not just the video texture) by 90° each tap.
+        // The video keeps playing at the current timestamp during orientation changes.
+        val rotateButton = label("⟳", 28f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER
+            contentDescription = "Girar tela 90 graus"
+            background = background(0xAA18181A.toInt(), red, 12)
+            setOnClickListener { rotateScreen() }
+        }
+        root.addView(rotateButton, FrameLayout.LayoutParams(dp(48), dp(44),
+            Gravity.BOTTOM or Gravity.RIGHT).apply {
+            rightMargin = dp(9)
+            bottomMargin = dp(5)
+        })
+
         ui.removeCallbacks(updateProgress)
         ui.post(updateProgress)
         selectVideo()
+    }
+
+    private fun rotateScreen() {
+        rotationStep = (rotationStep + 1) % 4
+        requestedOrientation = when (rotationStep) {
+            1 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            2 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            3 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
     }
 
     private fun selectVideo() {
@@ -416,6 +445,10 @@ class MainActivity : Activity() {
     }
 
     private fun releasePlayer() {
+        if (screen == Screen.PLAYER) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            rotationStep = 0
+        }
         ui.removeCallbacks(updateProgress)
         seekBar = null
         seekInProgress = false
